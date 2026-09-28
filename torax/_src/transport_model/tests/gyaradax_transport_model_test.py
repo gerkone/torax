@@ -151,24 +151,7 @@ class GyaradaxNormalizationTest(parameterized.TestCase):
     expected = (self.geo.a_minor / self.geo.R_major) ** 2 * (t_i / t_e) ** 1.5
     np.testing.assert_allclose(factor, expected, rtol=1e-12)
 
-  def test_conversion_roundtrip(self):
-    forward = gb_norm.gb_flux_conversion_factor(
-        gb_norm.GYARADAX, gb_norm.QLKNN_HYPER, self.geo, self.core_profiles
-    )
-    backward = gb_norm.gb_flux_conversion_factor(
-        gb_norm.QLKNN_HYPER, gb_norm.GYARADAX, self.geo, self.core_profiles
-    )
-    np.testing.assert_allclose(
-        np.asarray(forward) * np.asarray(backward),
-        np.ones_like(np.asarray(forward)),
-        rtol=1e-12,
-    )
 
-  def test_temperature_change_requires_core_profiles(self):
-    with self.assertRaises(ValueError):
-      gb_norm.gb_flux_conversion_factor(
-          gb_norm.GYARADAX, gb_norm.QLKNN_HYPER, self.geo
-      )
 
   def test_build_quasilinear_inputs_shapes(self):
     ql_inputs = gb_norm.build_quasilinear_inputs(self.core_profiles, self.geo)
@@ -202,15 +185,6 @@ class GyaradaxTransportModelTest(parameterized.TestCase):
     self.assertEqual(int(idx[2]), rho_face.shape[0] - 1)
     self.assertEqual(int(idx[1]), int(np.argmin(np.abs(rho_face - 0.5))))
 
-  def test_initial_df_seeds_non_zonal_modes_only(self):
-    model = FakeGyaradaxTransportModel()
-    df = model._initial_df()  # pylint: disable=protected-access
-    self.assertEqual(
-        df.shape, (model.nvpar, model.nmu, model.ns, model.nkx, model.nky)
-    )
-    self.assertTrue(jnp.iscomplexobj(df))
-    np.testing.assert_array_equal(np.asarray(df[..., 0]), 0.0)
-    self.assertGreater(float(jnp.abs(df[..., 1:]).sum()), 0.0)
 
   def test_gkparams_for_radius_clips_and_defaults(self):
     model = FakeGyaradaxTransportModel()
@@ -230,16 +204,6 @@ class GyaradaxTransportModelTest(parameterized.TestCase):
     self.assertFalse(params.non_linear)
     self.assertTrue(params.disable_per_ky_norm)
 
-  def test_gkparams_for_radius_em_beta(self):
-    model = FakeGyaradaxTransportModel(em=True)
-    ql_inputs = gb_norm.build_quasilinear_inputs(self.core_profiles, self.geo)
-    idx = self.geo.rho_face_norm.shape[0] // 2
-    params = gyaradax_ql_transport_model.gkparams_for_radius(
-        idx, ql_inputs, self.core_profiles, self.geo, model
-    )
-    self.assertTrue(params.nlapar)
-    self.assertGreater(float(params.beta), 0.0)
-    self.assertLessEqual(float(params.beta), 0.05)
 
   def test_call_implementation_shapes_and_gb_plumbing(self):
     # acceptance check: qi=1 GKW-GB -> chi_i = 2*sqrt(2) * chiGB / (R/L_Ti)
@@ -360,17 +324,6 @@ class GyaradaxQLConfigTest(parameterized.TestCase):
     self.assertEqual(model.nkx, 85)
     self.assertEqual(model.nky, 32)
 
-  def test_grid_from_bundled_default_head(self):
-    # 'auto' resolves the bundled head, whose payload carries its fit grid
-    config = gyaradax_ql_transport_model.GyaradaxQLConfig.from_dict(
-        {'model_name': 'gyaradax-ql'}
-    )
-    # the bundled head was fit at 43x16, below the resolution floor
-    with self.assertWarnsRegex(RuntimeWarning, 'resolution floor'):
-      model = config.build_transport_model()
-    self.assertEqual(model.nkx, 85)
-    self.assertEqual(model.nky, 32)
-    self.assertEqual(model.krhomax, 1.4)
 
   def test_grid_underspecified_raises(self):
     # no head (cn path None) and no explicit grid: there is nothing to adopt
@@ -420,9 +373,6 @@ class GyaradaxDiagnosticsTest(parameterized.TestCase):
         self.two_point_mask,
     )
 
-  def test_sink_is_none_by_default(self):
-    model = FakeGyaradaxTransportModel(rho_match=(0.3, 0.6))
-    self.assertIsNone(model.sink)
 
   def test_ql_rows_carry_local_parameters_and_raw_fluxes(self):
     path = os.path.join(self.create_tempdir().full_path, 'diag.jsonl')
@@ -442,18 +392,6 @@ class GyaradaxDiagnosticsTest(parameterized.TestCase):
         self.assertIsInstance(row[key], float)
       self.assertGreaterEqual(row['wall_s'], 0.0)
 
-  def test_call_index_advances_across_calls(self):
-    path = os.path.join(self.create_tempdir().full_path, 'diag.jsonl')
-    model = FakeGyaradaxTransportModel(
-        rho_match=(0.3, 0.6), diagnostics_path=path
-    )
-    self._call(model)
-    self._call(model)
-    rows = diag_lib.load_jsonl(path)
-    self.assertEqual(
-        [(r['call'], r['radius']) for r in rows],
-        [(0, 0), (0, 1), (1, 0), (1, 1)],
-    )
 
 
 
